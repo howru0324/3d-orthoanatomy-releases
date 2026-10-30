@@ -1,0 +1,59 @@
+name: Publish test 0.4.2-beta.3
+on:
+  push:
+    branches: [publish/test-0.4.2-beta.3]
+    paths: [.github/workflows/publish-test-0.4.2-beta.3.yml]
+permissions:
+  contents: write
+concurrency:
+  group: publish-test-0.4.2-beta.3
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: howru0324/3d-orthoanatomy-releases
+      RELEASE_BUNDLE_URL: "https://sdmntprkoreacentral.oaiusercontent.com/files/00000000-7c00-8206-8936-f6e037de5a0e/raw?se=2026-10-30T05%3A59%3A14Z&sp=r&sv=2026-02-06&sr=b&scid=da77c8fa-ae8a-4078-8b39-2f8d5b6719d2&skoid=1e4bb9ed-6bb5-424a-a3aa-79f21566e722&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-10-30T01%3A10%3A16Z&ske=2026-10-31T01%3A10%3A16Z&sks=b&skv=2026-02-06&sig=Gb0X%2Br85TMrInx0ObRjcbELYxzLwgV7a6lPODa2V354%3D"
+      RELEASE_BUNDLE_SHA256: "fa5d8553563e65873b703f14dc534c58c27e7d4d03005dbf6244a6de38dbec30"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Download installer-only bundle and verify artifact digest
+        run: |
+          $bundle = Join-Path $env:RUNNER_TEMP 'test-installer.zip'
+          Invoke-WebRequest -Uri $env:RELEASE_BUNDLE_URL -OutFile $bundle
+          $digest = (Get-FileHash -LiteralPath $bundle -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($digest -ne $env:RELEASE_BUNDLE_SHA256) { throw 'Artifact digest mismatch' }
+          Expand-Archive -LiteralPath $bundle -DestinationPath (Join-Path $env:RUNNER_TEMP 'release-assets')
+      - name: Verify installer, update manifest and blockmap
+        run: node scripts/verify-test-0.4.2-beta.3.cjs "$env:RUNNER_TEMP/release-assets"
+      - name: Create draft and upload verified assets
+        run: |
+          gh release create v0.4.2-beta.3 --draft --prerelease --title "3D orthoanatomy 0.4.2-beta.3 · Test" --notes-file release-notes-0.4.2-beta.3.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $assets = Get-Content "$env:RUNNER_TEMP/verified-assets.json" -Raw | ConvertFrom-Json
+          foreach ($asset in $assets) {
+            gh release upload v0.4.2-beta.3 $asset.file
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Verify uploaded sizes and SHA256 before publication
+        run: |
+          $raw = gh api repos/howru0324/3d-orthoanatomy-releases/releases/tags/v0.4.2-beta.3
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $release = $raw | ConvertFrom-Json
+          if (!$release.draft -or !$release.prerelease -or $release.assets.Count -ne 3) { throw 'Unexpected release state' }
+          $assets = Get-Content "$env:RUNNER_TEMP/verified-assets.json" -Raw | ConvertFrom-Json
+          foreach ($expected in $assets) {
+            $actual = @($release.assets | Where-Object name -EQ $expected.name)
+            if ($actual.Count -ne 1 -or $actual[0].size -ne $expected.size -or $actual[0].digest -ne $expected.digest) { throw "Uploaded asset mismatch: $($expected.name)" }
+          }
+      - name: Publish verified beta release
+        run: |
+          gh release edit v0.4.2-beta.3 --draft=false --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release view v0.4.2-beta.3 --json url,isDraft,isPrerelease,assets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
