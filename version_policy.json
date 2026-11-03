@@ -1,0 +1,14 @@
+{
+  "stable": {
+    "min_required_version": "0.3.0",
+    "kill_switch": false,
+    "notice_message": "필수 업데이트가 있습니다. 새 버전을 설치해 주세요.",
+    "redirect_url": "https://github.com/howru0324/3d-orthoanatomy-releases/releases/latest"
+  },
+  "beta": {
+    "min_required_version": "0.4.2-beta.5",
+    "kill_switch": false,
+    "notice_message": "새 테스트 버전이 필요하거나 테스트 이용이 종료되었습니다. 배포 페이지를 확인해 주세요.",
+    "redirect_url": "https://github.com/howru0324/3d-orthoanatomy-releases/releases"
+  }
+}
