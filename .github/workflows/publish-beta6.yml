@@ -1,8 +1,8 @@
-name: Verify and publish test 0.4.2-beta.6
+name: Publish verified test 0.4.2-beta.6
 on:
   push:
     branches: [publish/test-0.4.2-beta.6]
-    paths: [publication.json]
+    paths: [.github/workflows/publish-beta6.yml]
 permissions:
   contents: write
 concurrency:
@@ -11,30 +11,28 @@ concurrency:
 jobs:
   publish:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: howru0324/3d-orthoanatomy-releases
     steps:
-      - uses: actions/checkout@v4
-      - name: Verify installer-only archive, checksums, manifest and blockmap
-        run: python scripts/prepare-beta6.py
-      - name: Create draft and upload verified assets
+      - name: Verify draft asset sizes and SHA256
         run: |
-          gh release create v0.4.2-beta.6 --draft --prerelease --latest=false --title "3D orthoanatomy 0.4.2-beta.6" --notes-file release-notes-0.4.2-beta.6.md
+          $raw = gh api "repos/howru0324/3d-orthoanatomy-releases/releases?per_page=100"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          gh release upload v0.4.2-beta.6 verified/3D-orthoanatomy-Setup-0.4.2-beta.6.exe verified/3D-orthoanatomy-Setup-0.4.2-beta.6.exe.blockmap verified/beta.yml
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Verify uploaded asset digests and publish beta only
-        run: |
-          $release = gh api repos/howru0324/3d-orthoanatomy-releases/releases/tags/v0.4.2-beta.6 | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (!$release.draft -or !$release.prerelease -or $release.assets.Count -ne 3) { throw 'Unexpected draft state' }
-          $expected = Get-Content verified-assets.json -Raw | ConvertFrom-Json
+          $matching = @(($raw | ConvertFrom-Json) | Where-Object tag_name -EQ 'v0.4.2-beta.6')
+          if ($matching.Count -ne 1) { throw 'Expected exactly one beta.6 draft' }
+          $release = $matching[0]
+          if ($release.id -ne 432276916 -or !$release.draft -or !$release.prerelease -or $release.assets.Count -ne 3) { throw 'Unexpected release state' }
+          $expected = '[{"name":"3D-orthoanatomy-Setup-0.4.2-beta.6.exe","size":367542577,"digest":"sha256:d6fdbc03f190acd9b37dc70d75085d9c35f49d76b47396966be83428b1b29e00"},{"name":"3D-orthoanatomy-Setup-0.4.2-beta.6.exe.blockmap","size":385614,"digest":"sha256:5b8b60e856bb97371e1548e2e81cb57713ab3c2f27efd01ef5b968960cc289f7"},{"name":"beta.yml","size":380,"digest":"sha256:f7b951210f3c73ff0f853f229e24f22415e3052f7edc5044fb9feccddb231470"}]' | ConvertFrom-Json
           foreach ($item in $expected) {
-            $asset = @($release.assets | Where-Object name -EQ $item.name)
-            if ($asset.Count -ne 1 -or $asset[0].size -ne $item.size -or $asset[0].digest -ne $item.digest) { throw 'Uploaded asset verification failed' }
+            $actual = @($release.assets | Where-Object name -EQ $item.name)
+            if ($actual.Count -ne 1 -or $actual[0].size -ne $item.size -or $actual[0].digest -ne $item.digest) { throw "Asset mismatch: $($item.name)" }
           }
-          gh release edit v0.4.2-beta.6 --draft=false --prerelease --latest=false
+          Write-Host 'PASS: all three assets match the verified installer bundle'
+      - name: Publish verified beta without changing latest stable
+        run: |
+          gh api --method PATCH repos/howru0324/3d-orthoanatomy-releases/releases/432276916 -F draft=false -F prerelease=true -f make_latest=false
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release view v0.4.2-beta.6 --json url,isDraft,isPrerelease,assets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
