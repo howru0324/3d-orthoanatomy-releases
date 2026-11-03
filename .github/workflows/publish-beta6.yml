@@ -1,0 +1,40 @@
+name: Verify and publish test 0.4.2-beta.6
+on:
+  push:
+    branches: [publish/test-0.4.2-beta.6]
+    paths: [publication.json]
+permissions:
+  contents: write
+concurrency:
+  group: publish-test-0.4.2-beta.6
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: howru0324/3d-orthoanatomy-releases
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify installer-only archive, checksums, manifest and blockmap
+        run: python scripts/prepare-beta6.py
+      - name: Create draft and upload verified assets
+        run: |
+          gh release create v0.4.2-beta.6 --draft --prerelease --latest=false --title "3D orthoanatomy 0.4.2-beta.6" --notes-file release-notes-0.4.2-beta.6.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release upload v0.4.2-beta.6 verified/3D-orthoanatomy-Setup-0.4.2-beta.6.exe verified/3D-orthoanatomy-Setup-0.4.2-beta.6.exe.blockmap verified/beta.yml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify uploaded asset digests and publish beta only
+        run: |
+          $release = gh api repos/howru0324/3d-orthoanatomy-releases/releases/tags/v0.4.2-beta.6 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!$release.draft -or !$release.prerelease -or $release.assets.Count -ne 3) { throw 'Unexpected draft state' }
+          $expected = Get-Content verified-assets.json -Raw | ConvertFrom-Json
+          foreach ($item in $expected) {
+            $asset = @($release.assets | Where-Object name -EQ $item.name)
+            if ($asset.Count -ne 1 -or $asset[0].size -ne $item.size -or $asset[0].digest -ne $item.digest) { throw 'Uploaded asset verification failed' }
+          }
+          gh release edit v0.4.2-beta.6 --draft=false --prerelease --latest=false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release view v0.4.2-beta.6 --json url,isDraft,isPrerelease,assets
